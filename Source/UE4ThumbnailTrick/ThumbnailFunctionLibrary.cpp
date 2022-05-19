@@ -2,42 +2,53 @@
 
 
 #include "ThumbnailFunctionLibrary.h"
-#include "UObject/Object.h"
+
 #include "Misc/Paths.h"
 #include "HAL/UnrealMemory.h"
+#include "GenericPlatform/GenericPlatformFile.h"
 #include "UObject/UObjectGlobals.h"
 #include "ObjectTools.h"
+#include <Runtime\AssetRegistry\Public\AssetRegistry\AssetRegistryModule.h>
+
 
 
 UTexture2D* UThumbnailFunctionLibrary::MakeThumbnail(UObject * _Object, int width, int  height)
 {
-	FString FileName = FString("MyTexture");
-	FObjectThumbnail  ObjectThumbnail;
+	FString FileName = FString("Texture_")+ _Object->GetName();
+	
 	FString pathPackage = FString("/Game/MyTextures/");
 	FString absolutePathPackage = FPaths::ProjectContentDir() + "/MyTextures/";
+	
+	
+	UPackage* Package = CreatePackage(nullptr, *pathPackage);
 
-	FPackageName::RegisterMountPoint(*pathPackage, *absolutePathPackage);
+	IPlatformFile & PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
 
-	UPackage * Package = CreatePackage(nullptr, *pathPackage);
-	// Create the Texture
-	FName TextureName = MakeUniqueObjectName(Package, UTexture2D::StaticClass(), FName(*FileName));
-	UTexture2D* Texture = NewObject<UTexture2D>();// NewObject(Package, TextureName, RF_Public | RF_Standalone);
-	//UTexture2D* Texture = NewObject<UTexture2D>(nullptr, Package, TextureName, RF_Public | RF_Standalone, UTexture2D.GetDefaultObject());
-		// NewObject(nullptr,Package, TextureName, RF_Public | RF_Standalone,nullptr,false,nullptr,nullptr);
-
-
-
-	TArray<uint8>  temp;
-	if (_Object != nullptr)
+	// Directory Exists?
+	if (!PlatformFile.DirectoryExists(*absolutePathPackage))
 	{
-		//UThumbnailInfo * temp = MeshAsset.Object->ThumbnailInfo;
+		PlatformFile.CreateDirectory(*absolutePathPackage);
+	}
+	
+	// Create the Texture
+	FName TextureName = MakeUniqueObjectName(_Object, UTexture2D::StaticClass(), FName(*FileName));
+	UTexture2D* Texture = NewObject<UTexture2D>();
+
+
+	FObjectThumbnail  ObjectThumbnail;
+	TArray<uint8>  temp;
+
+	if (_Object != nullptr)	
+	{
+		
 		ThumbnailTools::RenderThumbnail(_Object, width, height,
 			ThumbnailTools::EThumbnailTextureFlushMode::NeverFlush, NULL, &ObjectThumbnail);
+
 		temp = ObjectThumbnail.GetUncompressedImageData();
-		///
+		
 
 		uint8 * pixels = (uint8 *)malloc(height * width * 4);
-		//pixels = temp;
+		
 		for (int y = 0; y < height*width * 4; y++)
 		{
 
@@ -59,13 +70,24 @@ UTexture2D* UThumbnailFunctionLibrary::MakeThumbnail(UObject * _Object, int widt
 		uint8* TextureData = (uint8 *)Mip->BulkData.Realloc(height * width * sizeof(uint8) * 4);
 		FMemory::Memcpy(TextureData, pixels, sizeof(uint8) * height * width * 4);
 		Mip->BulkData.Unlock();
-		//		FMemory::Memcpy()
-				// Updating Texture & mark it as unsaved
+
+		Texture->Source.Init(width, height, 1, 1, ETextureSourceFormat::TSF_BGRA8, pixels);
 		Texture->AddToRoot();
 		Texture->UpdateResource();
+		Package->MarkPackageDirty();
+		
+		FAssetRegistryModule::AssetCreated(Texture);
+	
+		FString PackageName = FString("/Game/MyTextures/");
+		PackageName += TextureName.ToString();
 
-		/////------------------------------------------
-		return Texture;
+		FString PackageFileName = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
+		bool bSaved = UPackage::SavePackage(Package, Texture, EObjectFlags::RF_Public | EObjectFlags::RF_Standalone, *PackageFileName, GError, nullptr, true, true, SAVE_NoError);
+
+
+		free(pixels);
+		pixels = NULL;
+	
 	}
 
 
